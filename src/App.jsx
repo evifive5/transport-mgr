@@ -1716,43 +1716,682 @@ const ADMIN_NAV = [
 ];
 
 const DRIVER_NAV = [
-  {id:"dashboard",icon:"📊",label:"マイページ"},
-  {id:"attendance",icon:"🕐",label:"出退勤"},
-  {id:"orders",icon:"📦",label:"担当配送"},
-  {id:"labor",icon:"⚖️",label:"労務状況"},
-  {id:"safety",icon:"🔍",label:"アルコールチェック"},
-  {id:"messages",icon:"💬",label:"メッセージ"},
-  {id:"oplogs",icon:"📋",label:"運行記録"},
+  {id:"dashboard", icon:"🏠", label:"ホーム"},
+  {id:"attendance",icon:"🕐", label:"出退勤"},
+  {id:"orders",    icon:"📦", label:"配送"},
+  {id:"safety",    icon:"🔍", label:"安全"},
+  {id:"messages",  icon:"💬", label:"連絡"},
 ];
+
+// ══════════════════════════════════════════════════
+//  MOBILE DRIVER COMPONENTS
+// ══════════════════════════════════════════════════
+
+const mSt = {
+  card: {
+    background:C.s1, border:`1px solid ${C.bdr}`, borderRadius:12,
+    padding:"16px", marginBottom:12
+  },
+  label: { color:C.mut, fontSize:13, marginBottom:4, display:"block" },
+  val:   { color:C.txt, fontSize:17, fontWeight:700 },
+  bigBtn: {
+    width:"100%", border:"none", borderRadius:12, padding:"18px",
+    fontSize:18, fontWeight:900, cursor:"pointer", display:"flex",
+    alignItems:"center", justifyContent:"center", gap:10, lineHeight:1
+  },
+};
+
+function MCard({children, alert, style={}}){
+  return <div style={{...mSt.card, border:`1px solid ${alert?C.red:C.bdr}`, ...style}}>{children}</div>;
+}
+
+function MRow({label, value, color}){
+  return(
+    <div style={{display:"flex", justifyContent:"space-between", alignItems:"center",
+      padding:"10px 0", borderBottom:`1px solid ${C.bdr}`}}>
+      <span style={{color:C.mut, fontSize:15}}>{label}</span>
+      <span style={{color:color||C.txt, fontSize:15, fontWeight:600}}>{value}</span>
+    </div>
+  );
+}
+
+function MSection({title, children}){
+  return(
+    <div style={{marginBottom:20}}>
+      <div style={{color:C.mut, fontSize:12, fontWeight:700, textTransform:"uppercase",
+        letterSpacing:"0.1em", marginBottom:8, paddingLeft:4}}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+// ── モバイル: マイページ ──────────────────────────
+function MDriverDashboard({data, cDrvId, setTab}){
+  const {drivers, orders, attendance, messages} = data;
+  const drv = drivers.find(d=>d.id===cDrvId);
+  const today = todayStr();
+  const myAtt = attendance.find(a=>a.driverId===cDrvId&&a.date===today);
+  const lr = calcLabor(myAtt);
+  const myOrders = orders.filter(o=>o.driverId===cDrvId && o.date===today && o.status!=="完了" && o.status!=="キャンセル");
+  const unread = messages.filter(m=>m.to===cDrvId&&!m.read).length;
+  const licDu = daysUntil(drv?.licenseExpiry);
+
+  return(
+    <div style={{paddingBottom:100}}>
+      {/* ヘッダーカード */}
+      <div style={{background:C.accD, border:`1px solid ${C.acc}44`, borderRadius:12,
+        padding:"20px 16px", marginBottom:16, display:"flex", alignItems:"center", gap:14}}>
+        <div style={{width:54, height:54, borderRadius:"50%", background:C.acc+"33",
+          display:"flex", alignItems:"center", justifyContent:"center",
+          color:C.acc, fontWeight:900, fontSize:22}}>
+          {drv?.name?.slice(0,1)}
+        </div>
+        <div>
+          <div style={{color:C.acc, fontWeight:900, fontSize:20}}>{drv?.name}</div>
+          <div style={{color:C.txt, fontSize:14, marginTop:2}}>{drv?.group} / {drv?.license}</div>
+          <div style={{marginTop:6, display:"flex", gap:6}}>
+            <span style={{background:drv?.status==="待機中"?C.grnD:C.ylwD,
+              color:drv?.status==="待機中"?C.grn:C.ylw,
+              padding:"3px 10px", borderRadius:20, fontSize:13, fontWeight:700}}>
+              {drv?.status||"待機中"}
+            </span>
+            {myAtt && <span style={{background:C.blueD, color:C.blue,
+              padding:"3px 10px", borderRadius:20, fontSize:13, fontWeight:700}}>
+              出勤中
+            </span>}
+          </div>
+        </div>
+      </div>
+
+      {/* アラート */}
+      {licDu <= 60 && (
+        <div style={{background:licDu<=30?C.redD:C.ylwD, border:`1px solid ${licDu<=30?C.red:C.ylw}44`,
+          borderRadius:10, padding:"12px 14px", marginBottom:12, display:"flex", gap:10, alignItems:"center"}}>
+          <span style={{fontSize:22}}>⚠️</span>
+          <div>
+            <div style={{color:licDu<=30?C.red:C.ylw, fontWeight:700, fontSize:15}}>免許証の更新が必要です</div>
+            <div style={{color:C.mut, fontSize:13, marginTop:2}}>期限まで残り{licDu}日（{fmtDate(drv?.licenseExpiry)}）</div>
+          </div>
+        </div>
+      )}
+
+      {/* 労務サマリー */}
+      {lr && (
+        <MSection title="本日の労務状況">
+          <MCard alert={lr.over13}>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4, textAlign:"center"}}>
+              {[
+                {label:"拘束時間", val:fmtHM(lr.total), color:lr.over16?C.red:lr.over13?C.ylw:C.txt},
+                {label:"運転時間", val:fmtHM(lr.drive), color:lr.driveOver?C.ylw:C.txt},
+                {label:"残業時間", val:fmtHM(lr.overtime), color:lr.overtime>0?C.ylw:C.mut},
+              ].map((item,i)=>(
+                <div key={i} style={{padding:"10px 4px"}}>
+                  <div style={{color:C.mut, fontSize:12, marginBottom:4}}>{item.label}</div>
+                  <div style={{color:item.color, fontSize:20, fontWeight:900,
+                    fontFamily:"'Courier New',monospace"}}>{item.val}</div>
+                </div>
+              ))}
+            </div>
+            {lr.over16 && <div style={{background:C.red+"22", borderRadius:8, padding:"8px 10px", marginTop:8,
+              color:C.red, fontWeight:700, fontSize:14, textAlign:"center"}}>⚠ 拘束16時間超過（改善基準違反）</div>}
+            {!lr.over16 && lr.over13 && <div style={{background:C.ylw+"22", borderRadius:8, padding:"8px 10px", marginTop:8,
+              color:C.ylw, fontWeight:700, fontSize:14, textAlign:"center"}}>⚠ 拘束13時間超過</div>}
+          </MCard>
+        </MSection>
+      )}
+
+      {/* 本日の配送 */}
+      <MSection title={`本日の担当配送 (${myOrders.length}件)`}>
+        {myOrders.length===0
+          ? <div style={{...mSt.card, textAlign:"center", color:C.mut, fontSize:15, padding:24}}>本日の配送なし</div>
+          : myOrders.map(o=>(
+            <MCard key={o.id}>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8}}>
+                <code style={{color:C.acc, fontSize:13}}>{o.no}</code>
+                <span style={{background:o.status==="配送中"?C.ylwD:C.blueD,
+                  color:o.status==="配送中"?C.ylw:C.blue,
+                  padding:"3px 10px", borderRadius:20, fontSize:13, fontWeight:700}}>{o.status}</span>
+              </div>
+              <div style={{color:C.txt, fontSize:17, fontWeight:700, marginBottom:4}}>{o.customer}</div>
+              <div style={{color:C.mut, fontSize:14, marginBottom:12}}>{o.address}</div>
+              {o.note && <div style={{color:C.ylw, fontSize:13, marginBottom:10}}>⚠ {o.note}</div>}
+            </MCard>
+          ))
+        }
+      </MSection>
+
+      {/* クイックアクション */}
+      <MSection title="クイックアクション">
+        <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+          {[
+            {label:"出退勤", icon:"🕐", tab:"attendance", bg:C.blueD, color:C.blue},
+            {label:"アルコール\nチェック", icon:"🔍", tab:"safety", bg:C.grnD, color:C.grn},
+            {label:"配送確認", icon:"📦", tab:"orders", bg:C.accD, color:C.acc},
+            {label:"メッセージ"+(unread>0?` (${unread})`:""), icon:"💬", tab:"messages", bg:unread>0?C.redD:C.s2, color:unread>0?C.red:C.mut},
+          ].map((item,i)=>(
+            <button key={i} onClick={()=>setTab(item.tab)} style={{
+              background:item.bg, border:`1px solid ${item.color}33`,
+              borderRadius:12, padding:"16px 12px", cursor:"pointer",
+              textAlign:"center"}}>
+              <div style={{fontSize:28, marginBottom:6}}>{item.icon}</div>
+              <div style={{color:item.color, fontWeight:700, fontSize:14, whiteSpace:"pre-line", lineHeight:1.3}}>{item.label}</div>
+            </button>
+          ))}
+        </div>
+      </MSection>
+    </div>
+  );
+}
+
+// ── モバイル: 出退勤 ──────────────────────────────
+function MAttendance({data, setData, cDrvId}){
+  const {attendance, drivers} = data;
+  const today = todayStr();
+  const myAtt = attendance.find(a=>a.driverId===cDrvId&&a.date===today);
+  const lr = calcLabor(myAtt);
+  const [breaking, setBreaking] = useState(false);
+
+  const clockIn = () => {
+    if(myAtt) return alert("本日すでに出勤登録済みです");
+    setData(d=>({...d, attendance:[...d.attendance,{
+      id:genId(), driverId:cDrvId, date:today,
+      clockIn:nowTime(), clockOut:null, breaks:[],
+      driveMin:0, status:"出勤中", alcoholMorn:null, alcoholEve:null, note:""
+    }]}));
+  };
+
+  const clockOut = () => {
+    if(!myAtt) return alert("本日の出勤記録がありません");
+    if(!confirm("退勤しますか？")) return;
+    setData(d=>({...d, attendance:d.attendance.map(a=>
+      a.id===myAtt.id ? {...a, clockOut:nowTime(), status:"退勤済"} : a
+    )}));
+  };
+
+  const startBreak = () => {
+    if(!myAtt) return;
+    const newBrk = {start:nowTime(), end:null};
+    setData(d=>({...d, attendance:d.attendance.map(a=>
+      a.id===myAtt.id ? {...a, breaks:[...a.breaks, newBrk]} : a
+    )}));
+    setBreaking(true);
+  };
+
+  const endBreak = () => {
+    if(!myAtt) return;
+    const brks = [...myAtt.breaks];
+    const last = brks.length-1;
+    if(last>=0 && !brks[last].end) brks[last] = {...brks[last], end:nowTime()};
+    setData(d=>({...d, attendance:d.attendance.map(a=>
+      a.id===myAtt.id ? {...a, breaks:brks} : a
+    )}));
+    setBreaking(false);
+  };
+
+  const myRecs = attendance.filter(a=>a.driverId===cDrvId)
+    .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,10);
+
+  return(
+    <div style={{paddingBottom:100}}>
+      <div style={{color:C.txt, fontSize:20, fontWeight:900, marginBottom:16}}>出退勤管理</div>
+
+      {/* 今日の状態 */}
+      <MCard alert={lr?.over13}>
+        <div style={{textAlign:"center", marginBottom:16}}>
+          <div style={{color:C.mut, fontSize:13, marginBottom:4}}>{fmtDate(today)}</div>
+          {myAtt
+            ? <div style={{color:myAtt.clockOut?C.mut:C.grn, fontSize:16, fontWeight:700}}>
+                {myAtt.clockOut ? "退勤済" : "出勤中"}
+              </div>
+            : <div style={{color:C.dim, fontSize:16}}>未出勤</div>
+          }
+        </div>
+        {myAtt && (
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16}}>
+            <div style={{background:C.s2, borderRadius:8, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:4}}>出勤</div>
+              <div style={{color:C.grn, fontSize:22, fontWeight:900, fontFamily:"'Courier New',monospace"}}>{myAtt.clockIn}</div>
+            </div>
+            <div style={{background:C.s2, borderRadius:8, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:4}}>退勤</div>
+              <div style={{color:myAtt.clockOut?C.txt:C.ylw, fontSize:22, fontWeight:900, fontFamily:"'Courier New',monospace"}}>
+                {myAtt.clockOut || nowTime()}
+              </div>
+            </div>
+          </div>
+        )}
+        {lr && (
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:16}}>
+            <div style={{background:C.s2, borderRadius:8, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:4}}>拘束時間</div>
+              <div style={{color:lr.over13?C.red:C.txt, fontSize:20, fontWeight:900,
+                fontFamily:"'Courier New',monospace"}}>{fmtHM(lr.total)}</div>
+            </div>
+            <div style={{background:C.s2, borderRadius:8, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:4}}>休憩合計</div>
+              <div style={{color:C.blue, fontSize:20, fontWeight:900,
+                fontFamily:"'Courier New',monospace"}}>{fmtHM(lr.breakMin)}</div>
+            </div>
+          </div>
+        )}
+        {/* ボタン群 */}
+        <div style={{display:"flex", flexDirection:"column", gap:10}}>
+          {!myAtt && (
+            <button onClick={clockIn} style={{...mSt.bigBtn, background:C.grn, color:"#000"}}>
+              <span style={{fontSize:24}}>🟢</span> 出勤する
+            </button>
+          )}
+          {myAtt && !myAtt.clockOut && !breaking && (
+            <button onClick={startBreak} style={{...mSt.bigBtn, background:C.blueD,
+              color:C.blue, border:`2px solid ${C.blue}44`}}>
+              <span style={{fontSize:22}}>⏸</span> 休憩開始
+            </button>
+          )}
+          {myAtt && !myAtt.clockOut && breaking && (
+            <button onClick={endBreak} style={{...mSt.bigBtn, background:C.ylwD,
+              color:C.ylw, border:`2px solid ${C.ylw}44`}}>
+              <span style={{fontSize:22}}>▶</span> 休憩終了
+            </button>
+          )}
+          {myAtt && !myAtt.clockOut && (
+            <button onClick={clockOut} style={{...mSt.bigBtn, background:C.redD,
+              color:C.red, border:`2px solid ${C.red}44`}}>
+              <span style={{fontSize:24}}>🔴</span> 退勤する
+            </button>
+          )}
+        </div>
+      </MCard>
+
+      {/* 直近の記録 */}
+      <MSection title="最近の記録">
+        {myRecs.map(a=>{
+          const r = calcLabor(a);
+          return(
+            <div key={a.id} style={{...mSt.card, borderLeft:`3px solid ${r?.over13?C.red:r?.total>0?C.grn:C.bdr}`}}>
+              <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
+                <span style={{color:C.txt, fontSize:15, fontWeight:700}}>{fmtDate(a.date)}</span>
+                <span style={{color:a.status==="退勤済"?C.grn:a.status==="出勤中"?C.ylw:C.mut,
+                  fontSize:13, fontWeight:700}}>{a.status}</span>
+              </div>
+              <div style={{display:"flex", gap:16, fontSize:14, color:C.mut}}>
+                <span>出勤 <span style={{color:C.grn, fontFamily:"'Courier New',monospace"}}>{a.clockIn}</span></span>
+                <span>退勤 <span style={{color:C.txt, fontFamily:"'Courier New',monospace"}}>{a.clockOut||"--"}</span></span>
+                {r && <span>拘束 <span style={{color:r.over13?C.red:C.txt, fontFamily:"'Courier New',monospace",
+                  fontWeight:700}}>{fmtHM(r.total)}</span></span>}
+              </div>
+            </div>
+          );
+        })}
+      </MSection>
+    </div>
+  );
+}
+
+// ── モバイル: 担当配送 ────────────────────────────
+function MOrders({data, setData, cDrvId}){
+  const {orders, vehicles} = data;
+  const [filt, setFilt] = useState("active");
+  const base = orders.filter(o=>o.driverId===cDrvId);
+  const shown = filt==="active"
+    ? base.filter(o=>o.status!=="完了"&&o.status!=="キャンセル")
+    : base.filter(o=>o.status==="完了"||o.status==="キャンセル");
+
+  const changeStatus = (id, s) =>
+    setData(d=>({...d, orders:d.orders.map(o=>o.id===id?{...o,status:s}:o)}));
+
+  const updateTime = (id, field) =>
+    setData(d=>({...d, orders:d.orders.map(o=>o.id===id?{...o,[field]:nowTime()}:o)}));
+
+  return(
+    <div style={{paddingBottom:100}}>
+      <div style={{color:C.txt, fontSize:20, fontWeight:900, marginBottom:16}}>担当配送</div>
+      <div style={{display:"flex", gap:8, marginBottom:16}}>
+        {[["active","進行中"],["done","完了・済"]].map(([v,l])=>(
+          <button key={v} onClick={()=>setFilt(v)} style={{
+            flex:1, padding:"10px", border:"none", borderRadius:8,
+            background:filt===v?C.acc:C.s2, color:filt===v?"#000":C.mut,
+            fontSize:15, fontWeight:700, cursor:"pointer"}}>{l}</button>
+        ))}
+      </div>
+      {shown.length===0
+        ? <div style={{...mSt.card, textAlign:"center", color:C.mut, fontSize:16, padding:32}}>
+            {filt==="active" ? "担当中の配送なし" : "完了した配送なし"}
+          </div>
+        : shown.map(o=>{
+          const veh = vehicles.find(v=>v.id===o.vehicleId);
+          return(
+            <MCard key={o.id}>
+              <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10}}>
+                <code style={{color:C.acc, fontSize:13}}>{o.no}</code>
+                <span style={{
+                  background:o.status==="完了"?C.grnD:o.status==="配送中"?C.ylwD:C.blueD,
+                  color:o.status==="完了"?C.grn:o.status==="配送中"?C.ylw:C.blue,
+                  padding:"4px 12px", borderRadius:20, fontSize:14, fontWeight:700
+                }}>{o.status}</span>
+              </div>
+              <div style={{color:C.txt, fontSize:18, fontWeight:700, marginBottom:4}}>{o.customer}</div>
+              <div style={{color:C.mut, fontSize:15, marginBottom:4}}>{o.address}</div>
+              <div style={{color:C.mut, fontSize:14, marginBottom:8}}>
+                {o.weight}kg {o.date&&`/ ${fmtDate(o.date)}`}
+                {veh&&<span style={{marginLeft:8}}>🚛 {veh.plate}</span>}
+              </div>
+              {o.note && <div style={{background:C.ylwD, borderRadius:8, padding:"8px 10px",
+                color:C.ylw, fontSize:14, marginBottom:10}}>⚠ {o.note}</div>}
+
+              {/* 積込・荷降ろし時間記録 */}
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12}}>
+                <div style={{background:C.s2, borderRadius:8, padding:"8px 10px"}}>
+                  <div style={{color:C.mut, fontSize:12, marginBottom:4}}>積込</div>
+                  <div style={{color:C.grn, fontSize:14, fontFamily:"'Courier New',monospace"}}>
+                    {o.loadStart||"--"} 〜 {o.loadEnd||"--"}
+                  </div>
+                </div>
+                <div style={{background:C.s2, borderRadius:8, padding:"8px 10px"}}>
+                  <div style={{color:C.mut, fontSize:12, marginBottom:4}}>荷降ろし</div>
+                  <div style={{color:C.blue, fontSize:14, fontFamily:"'Courier New',monospace"}}>
+                    {o.unloadStart||"--"} 〜 {o.unloadEnd||"--"}
+                  </div>
+                </div>
+              </div>
+
+              {/* アクションボタン */}
+              {o.status==="配車済み" && (
+                <div style={{display:"flex", flexDirection:"column", gap:8}}>
+                  {!o.loadStart && <button onClick={()=>updateTime(o.id,"loadStart")} style={{
+                    ...mSt.bigBtn, background:C.grnD, color:C.grn,
+                    border:`1px solid ${C.grn}44`, fontSize:15}}>
+                    📥 積込開始
+                  </button>}
+                  {o.loadStart && !o.loadEnd && <button onClick={()=>updateTime(o.id,"loadEnd")} style={{
+                    ...mSt.bigBtn, background:C.grnD, color:C.grn,
+                    border:`1px solid ${C.grn}44`, fontSize:15}}>
+                    ✅ 積込完了
+                  </button>}
+                  {o.loadEnd && <button onClick={()=>changeStatus(o.id,"配送中")} style={{
+                    ...mSt.bigBtn, background:C.ylwD, color:C.ylw,
+                    border:`1px solid ${C.ylw}44`, fontSize:15}}>
+                    🚛 出発・配送開始
+                  </button>}
+                </div>
+              )}
+              {o.status==="配送中" && (
+                <div style={{display:"flex", flexDirection:"column", gap:8}}>
+                  {!o.unloadStart && <button onClick={()=>updateTime(o.id,"unloadStart")} style={{
+                    ...mSt.bigBtn, background:C.blueD, color:C.blue,
+                    border:`1px solid ${C.blue}44`, fontSize:15}}>
+                    📤 荷降ろし開始
+                  </button>}
+                  {o.unloadStart && !o.unloadEnd && <button onClick={()=>{
+                    updateTime(o.id,"unloadEnd");
+                    changeStatus(o.id,"完了");
+                  }} style={{
+                    ...mSt.bigBtn, background:C.grnD, color:C.grn,
+                    border:`1px solid ${C.grn}44`, fontSize:15}}>
+                    🎉 荷降ろし完了・配送完了
+                  </button>}
+                  {o.unloadEnd && <button onClick={()=>changeStatus(o.id,"完了")} style={{
+                    ...mSt.bigBtn, background:C.grnD, color:C.grn,
+                    border:`1px solid ${C.grn}44`, fontSize:15}}>
+                    ✅ 配送完了
+                  </button>}
+                </div>
+              )}
+            </MCard>
+          );
+        })
+      }
+    </div>
+  );
+}
+
+// ── モバイル: 安全管理 ────────────────────────────
+function MSafety({data, setData, cDrvId}){
+  const {attendance} = data;
+  const today = todayStr();
+  const myAtt = attendance.find(a=>a.driverId===cDrvId&&a.date===today);
+  const [result, setResult] = useState(null);
+
+  const saveCheck = (field, val) => {
+    if(!myAtt){alert("先に出勤登録を行ってください"); return;}
+    setData(d=>({...d, attendance:d.attendance.map(a=>
+      a.id===myAtt.id ? {...a, [field]:val} : a
+    )}));
+    setResult({field, val});
+  };
+
+  const myRecs = attendance.filter(a=>a.driverId===cDrvId)
+    .sort((a,b)=>b.date.localeCompare(a.date)).slice(0,7);
+
+  return(
+    <div style={{paddingBottom:100}}>
+      <div style={{color:C.txt, fontSize:20, fontWeight:900, marginBottom:16}}>安全管理</div>
+
+      <MSection title="アルコールチェック">
+        <MCard>
+          <div style={{textAlign:"center", marginBottom:16}}>
+            <div style={{fontSize:36, marginBottom:8}}>🍺</div>
+            <div style={{color:C.txt, fontSize:16, fontWeight:700}}>本日 {fmtDate(today)}</div>
+          </div>
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:12}}>
+            <div style={{background:C.s2, borderRadius:10, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:6}}>出勤前</div>
+              <div style={{color:myAtt?.alcoholMorn==="正常"?C.grn:myAtt?.alcoholMorn==="異常"?C.red:C.dim,
+                fontSize:16, fontWeight:700, marginBottom:6}}>
+                {myAtt?.alcoholMorn||"未実施"}
+              </div>
+            </div>
+            <div style={{background:C.s2, borderRadius:10, padding:"10px", textAlign:"center"}}>
+              <div style={{color:C.mut, fontSize:12, marginBottom:6}}>退勤後</div>
+              <div style={{color:myAtt?.alcoholEve==="正常"?C.grn:myAtt?.alcoholEve==="異常"?C.red:C.dim,
+                fontSize:16, fontWeight:700, marginBottom:6}}>
+                {myAtt?.alcoholEve||"未実施"}
+              </div>
+            </div>
+          </div>
+
+          {result && (
+            <div style={{background:result.val==="正常"?C.grnD:C.redD,
+              borderRadius:10, padding:"12px", textAlign:"center", marginBottom:12,
+              color:result.val==="正常"?C.grn:C.red, fontWeight:700, fontSize:16}}>
+              {result.val==="正常" ? "✅ 正常を記録しました" : "⚠️ 異常を記録しました"}
+            </div>
+          )}
+
+          <div style={{marginBottom:12}}>
+            <div style={{color:C.mut, fontSize:14, fontWeight:700, marginBottom:8}}>出勤前チェック</div>
+            <div style={{display:"flex", gap:8}}>
+              <button onClick={()=>saveCheck("alcoholMorn","正常")} style={{
+                flex:1, padding:"14px", border:`2px solid ${C.grn}44`,
+                borderRadius:10, background:C.grnD, color:C.grn,
+                fontSize:16, fontWeight:900, cursor:"pointer"}}>✅ 正常</button>
+              <button onClick={()=>saveCheck("alcoholMorn","異常")} style={{
+                flex:1, padding:"14px", border:`2px solid ${C.red}44`,
+                borderRadius:10, background:C.redD, color:C.red,
+                fontSize:16, fontWeight:900, cursor:"pointer"}}>❌ 異常</button>
+            </div>
+          </div>
+          <div>
+            <div style={{color:C.mut, fontSize:14, fontWeight:700, marginBottom:8}}>退勤後チェック</div>
+            <div style={{display:"flex", gap:8}}>
+              <button onClick={()=>saveCheck("alcoholEve","正常")} style={{
+                flex:1, padding:"14px", border:`2px solid ${C.grn}44`,
+                borderRadius:10, background:C.grnD, color:C.grn,
+                fontSize:16, fontWeight:900, cursor:"pointer"}}>✅ 正常</button>
+              <button onClick={()=>saveCheck("alcoholEve","異常")} style={{
+                flex:1, padding:"14px", border:`2px solid ${C.red}44`,
+                borderRadius:10, background:C.redD, color:C.red,
+                fontSize:16, fontWeight:900, cursor:"pointer"}}>❌ 異常</button>
+            </div>
+          </div>
+        </MCard>
+      </MSection>
+
+      <MSection title="チェック履歴">
+        {myRecs.map(a=>(
+          <div key={a.id} style={{...mSt.card,
+            borderLeft:`3px solid ${a.alcoholMorn==="異常"||a.alcoholEve==="異常"?C.red:
+              a.alcoholMorn&&a.alcoholEve?C.grn:C.bdr}`}}>
+            <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
+              <span style={{color:C.txt, fontSize:15, fontWeight:700}}>{fmtDate(a.date)}</span>
+              {a.alcoholMorn==="異常"||a.alcoholEve==="異常"
+                ? <span style={{color:C.red, fontWeight:700}}>異常あり</span>
+                : a.alcoholMorn&&a.alcoholEve
+                  ? <span style={{color:C.grn, fontWeight:700}}>✓ 完了</span>
+                  : <span style={{color:C.ylw}}>未完了</span>}
+            </div>
+            <div style={{display:"flex", gap:16, fontSize:14}}>
+              <span style={{color:C.mut}}>出勤前：
+                <span style={{color:a.alcoholMorn==="正常"?C.grn:a.alcoholMorn==="異常"?C.red:C.dim,
+                  fontWeight:700, marginLeft:4}}>{a.alcoholMorn||"未"}</span>
+              </span>
+              <span style={{color:C.mut}}>退勤後：
+                <span style={{color:a.alcoholEve==="正常"?C.grn:a.alcoholEve==="異常"?C.red:C.dim,
+                  fontWeight:700, marginLeft:4}}>{a.alcoholEve||"未"}</span>
+              </span>
+            </div>
+          </div>
+        ))}
+      </MSection>
+    </div>
+  );
+}
+
+// ── モバイル: メッセージ ──────────────────────────
+function MMessages({data, setData, cDrvId}){
+  const {messages} = data;
+  const [input, setInput] = useState("");
+  const thread = messages
+    .filter(m=>(m.from===cDrvId&&m.to==="admin")||(m.from==="admin"&&m.to===cDrvId))
+    .sort((a,b)=>a.ts.localeCompare(b.ts));
+  const endRef = useRef(null);
+
+  useEffect(()=>endRef.current?.scrollIntoView({behavior:"smooth"}),[thread.length]);
+
+  const send = () => {
+    if(!input.trim()) return;
+    const msg={id:genId(), from:cDrvId, to:"admin", content:input.trim(),
+      ts:new Date().toISOString(), read:false};
+    setData(d=>({...d, messages:[...d.messages, msg]}));
+    setInput("");
+  };
+
+  return(
+    <div style={{display:"flex", flexDirection:"column", height:"calc(100vh - 140px)"}}>
+      <div style={{color:C.txt, fontSize:20, fontWeight:900, marginBottom:12}}>管理者へのメッセージ</div>
+      <div style={{flex:1, overflowY:"auto", marginBottom:10}}>
+        {thread.length===0 && <div style={{textAlign:"center", color:C.mut, fontSize:15, marginTop:40}}>
+          メッセージなし
+        </div>}
+        {thread.map(m=>{
+          const isMine = m.from===cDrvId;
+          return(
+            <div key={m.id} style={{display:"flex", justifyContent:isMine?"flex-end":"flex-start", marginBottom:10}}>
+              {!isMine && <div style={{width:34, height:34, borderRadius:"50%", background:C.accD,
+                display:"flex", alignItems:"center", justifyContent:"center", color:C.acc,
+                fontSize:13, fontWeight:900, marginRight:8, flexShrink:0, marginTop:2}}>管</div>}
+              <div style={{
+                maxWidth:"78%", padding:"12px 14px", borderRadius:isMine?"14px 14px 4px 14px":"14px 14px 14px 4px",
+                background:isMine?C.accD:C.s2,
+                border:`1px solid ${isMine?C.acc+"44":C.bdr}`}}>
+                <div style={{color:isMine?C.acc:C.txt, fontSize:16, lineHeight:1.5}}>{m.content}</div>
+                <div style={{color:C.mut, fontSize:11, marginTop:4, textAlign:"right"}}>{m.ts.slice(11,16)}</div>
+              </div>
+            </div>
+          );
+        })}
+        <div ref={endRef}/>
+      </div>
+      <div style={{display:"flex", gap:8, paddingBottom:8}}>
+        <input value={input} onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}
+          placeholder="メッセージを入力..." style={{
+            ...inputSt, flex:1, fontSize:16, padding:"12px 14px", borderRadius:10}}/>
+        <button onClick={send} disabled={!input.trim()} style={{
+          background:input.trim()?C.acc:C.s2, color:input.trim()?"#000":C.dim,
+          border:"none", borderRadius:10, padding:"0 18px", fontSize:16, fontWeight:900,
+          cursor:input.trim()?"pointer":"default"}}>送信</button>
+      </div>
+    </div>
+  );
+}
+
+// ── モバイル: ボトムナビ ──────────────────────────
+function BottomNav({tab, setTab, data, cDrvId}){
+  const unread = data.messages.filter(m=>m.to===cDrvId&&!m.read).length;
+  return(
+    <nav style={{
+      position:"fixed", bottom:0, left:0, right:0,
+      background:C.s1, borderTop:`1px solid ${C.bdr}`,
+      display:"flex", zIndex:100,
+      paddingBottom:"env(safe-area-inset-bottom, 0px)"
+    }}>
+      {DRIVER_NAV.map(t=>{
+        const isMsg = t.id==="messages";
+        const active = tab===t.id;
+        return(
+          <button key={t.id} onClick={()=>setTab(t.id)} style={{
+            flex:1, background:"none", border:"none",
+            padding:"10px 4px 8px", cursor:"pointer",
+            display:"flex", flexDirection:"column", alignItems:"center", gap:3,
+            borderTop:active?`2px solid ${C.acc}`:"2px solid transparent",
+            position:"relative"}}>
+            <span style={{fontSize:22}}>{t.icon}</span>
+            <span style={{color:active?C.acc:C.mut, fontSize:11, fontWeight:active?700:400,
+              lineHeight:1}}>{t.label}</span>
+            {isMsg && unread>0 && (
+              <span style={{position:"absolute", top:6, right:"50%", marginRight:-12,
+                background:C.red, color:"#fff", borderRadius:"50%",
+                width:18, height:18, display:"flex", alignItems:"center",
+                justifyContent:"center", fontSize:10, fontWeight:900}}>{unread}</span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 function RoleSelect({onSelect,drivers}){
   const [did,setDid]=useState(drivers[0]?.id||"");
   return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",
-      fontFamily:"'Courier New',monospace",padding:16}}>
-      <div style={{textAlign:"center"}}>
-        <div style={{fontSize:56,marginBottom:8}}>🚛</div>
-        <div style={{color:C.acc,fontSize:24,fontWeight:900,letterSpacing:"0.18em",marginBottom:4}}>TRANSPORT MGR</div>
-        <div style={{color:C.dim,fontSize:11,letterSpacing:"0.25em",marginBottom:50}}>2024年問題対応 運行管理システム</div>
-        <div style={{display:"flex",gap:20,justifyContent:"center",flexWrap:"wrap"}}>
-          <button onClick={()=>onSelect("admin",null)} style={{
-            background:C.s1,border:`2px solid ${C.acc}`,borderRadius:12,padding:"28px 40px",
-            cursor:"pointer",transition:"all .15s",minWidth:160}}
-            onMouseEnter={e=>e.currentTarget.style.background=C.accD}
-            onMouseLeave={e=>e.currentTarget.style.background=C.s1}>
-            <div style={{fontSize:40,marginBottom:10}}>👤</div>
-            <div style={{color:C.acc,fontWeight:700,fontSize:16}}>管理者ログイン</div>
-          </button>
-          <div style={{background:C.s1,border:`2px solid ${C.bdr}`,borderRadius:12,padding:"28px 36px",textAlign:"center",minWidth:160}}>
-            <div style={{fontSize:40,marginBottom:10}}>🚗</div>
-            <div style={{color:C.txt,fontWeight:700,fontSize:16,marginBottom:14}}>ドライバー</div>
-            <select value={did} onChange={e=>setDid(e.target.value)} style={{...inputSt,marginBottom:14,width:170}}>
-              {drivers.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-            <br/>
-            <Btn full onClick={()=>onSelect("driver",did)}>ログイン</Btn>
-          </div>
+      fontFamily:"'Segoe UI','Noto Sans JP',system-ui,sans-serif",padding:20}}>
+      <div style={{width:"100%",maxWidth:400}}>
+        <div style={{textAlign:"center",marginBottom:40}}>
+          <div style={{fontSize:52,marginBottom:10}}>🚛</div>
+          <div style={{color:C.acc,fontSize:22,fontWeight:900,letterSpacing:"0.1em",marginBottom:4}}>TRANSPORT MGR</div>
+          <div style={{color:C.mut,fontSize:13}}>2024年問題対応 運行管理システム</div>
         </div>
+
+        {/* ドライバーログイン（スマホ向けに上に大きく） */}
+        <div style={{background:C.s1,border:`2px solid ${C.bdr}`,borderRadius:16,padding:"24px 20px",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18}}>
+            <span style={{fontSize:32}}>🚗</span>
+            <div style={{color:C.txt,fontWeight:900,fontSize:20}}>ドライバー</div>
+          </div>
+          <label style={{color:C.mut,fontSize:14,display:"block",marginBottom:8}}>名前を選んでください</label>
+          <select value={did} onChange={e=>setDid(e.target.value)}
+            style={{...inputSt,fontSize:18,padding:"14px",marginBottom:16,borderRadius:10}}>
+            {drivers.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+          <button onClick={()=>onSelect("driver",did)} style={{
+            width:"100%",background:C.acc,color:"#000",border:"none",
+            borderRadius:12,padding:"16px",fontSize:18,fontWeight:900,cursor:"pointer"}}>
+            ログイン
+          </button>
+        </div>
+
+        {/* 管理者ログイン（小さめに） */}
+        <button onClick={()=>onSelect("admin",null)} style={{
+          width:"100%",background:"none",border:`1px solid ${C.bdr}`,
+          borderRadius:12,padding:"14px 20px",cursor:"pointer",
+          display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:22}}>🖥</span>
+          <div style={{textAlign:"left"}}>
+            <div style={{color:C.txt,fontSize:15,fontWeight:700}}>管理者ログイン</div>
+            <div style={{color:C.mut,fontSize:12}}>PC推奨</div>
+          </div>
+        </button>
       </div>
     </div>
   );
@@ -1817,7 +2456,7 @@ export default function App(){
 
   if(!ready) return(
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:C.acc,fontSize:12,fontFamily:"'Courier New',monospace",letterSpacing:"0.15em"}}>LOADING...</div>
+      <div style={{color:C.acc,fontSize:14,fontFamily:"'Courier New',monospace",letterSpacing:"0.15em"}}>LOADING...</div>
     </div>
   );
 
@@ -1826,26 +2465,60 @@ export default function App(){
   const driverName=data.drivers.find(d=>d.id===cDrvId)?.name;
   const p={data,setData,role,cDrvId};
 
+  // ── ドライバー: スマホレイアウト ──
+  if(role==="driver"){
+    return(
+      <div style={{background:C.bg, minHeight:"100vh",
+        fontFamily:"'Segoe UI','Noto Sans JP',system-ui,sans-serif", color:C.txt}}>
+        {/* ヘッダー */}
+        <div style={{background:C.s1, borderBottom:`1px solid ${C.bdr}`,
+          padding:"12px 16px", display:"flex", justifyContent:"space-between", alignItems:"center",
+          position:"sticky", top:0, zIndex:50}}>
+          <div>
+            <div style={{color:C.acc, fontWeight:900, fontSize:13, letterSpacing:"0.08em"}}>🚛 TRANSPORT MGR</div>
+            <div style={{color:C.mut, fontSize:12}}>{driverName}</div>
+          </div>
+          <button onClick={()=>setRole(null)} style={{
+            background:"none", border:`1px solid ${C.bdr}`, borderRadius:8,
+            padding:"6px 12px", color:C.mut, fontSize:13, cursor:"pointer"}}>ログアウト</button>
+        </div>
+
+        {/* コンテンツ */}
+        <div style={{padding:"16px 14px"}}>
+          {tab==="dashboard" && <MDriverDashboard {...p} setTab={setTab}/>}
+          {tab==="attendance"&& <MAttendance {...p}/>}
+          {tab==="orders"    && <MOrders {...p}/>}
+          {tab==="safety"    && <MSafety {...p}/>}
+          {tab==="messages"  && <MMessages {...p}/>}
+        </div>
+
+        {/* ボトムナビ */}
+        <BottomNav tab={tab} setTab={setTab} data={data} cDrvId={cDrvId}/>
+      </div>
+    );
+  }
+
+  // ── 管理者: PC レイアウト ──
   return(
     <div style={{display:"flex",height:"100vh",background:C.bg,
       fontFamily:"'Segoe UI','Noto Sans JP',system-ui,sans-serif",overflow:"hidden",color:C.txt}}>
       <Sidebar tab={tab} setTab={setTab} role={role} onLogout={()=>setRole(null)} driverName={driverName} data={data}/>
       <main style={{flex:1,overflow:"auto",padding:24}}>
         {tab==="dashboard"&&<Dashboard {...p}/>}
-        {tab==="dispatch"&&role==="admin"&&<Dispatch {...p}/>}
+        {tab==="dispatch"&&<Dispatch {...p}/>}
         {tab==="orders"&&<Orders {...p}/>}
         {tab==="labor"&&<LaborMgmt {...p}/>}
         {tab==="attendance"&&<Attendance {...p}/>}
-        {tab==="shifts"&&role==="admin"&&<ShiftMgmt {...p}/>}
+        {tab==="shifts"&&<ShiftMgmt {...p}/>}
         {tab==="safety"&&<Safety {...p}/>}
         {tab==="notifications"&&<Notifications {...p}/>}
         {tab==="messages"&&<Messages {...p}/>}
-        {tab==="billing"&&role==="admin"&&<Billing {...p}/>}
-        {tab==="drivers"&&role==="admin"&&<DriverLedger {...p}/>}
-        {tab==="vehicles"&&role==="admin"&&<VehicleLedger {...p}/>}
-        {tab==="destinations"&&role==="admin"&&<Destinations {...p}/>}
+        {tab==="billing"&&<Billing {...p}/>}
+        {tab==="drivers"&&<DriverLedger {...p}/>}
+        {tab==="vehicles"&&<VehicleLedger {...p}/>}
+        {tab==="destinations"&&<Destinations {...p}/>}
         {tab==="oplogs"&&<OpLogs {...p}/>}
-        {tab==="admins"&&role==="admin"&&<AdminLedger {...p}/>}
+        {tab==="admins"&&<AdminLedger {...p}/>}
       </main>
     </div>
   );
